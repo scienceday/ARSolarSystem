@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+
+<head>
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+	
+	<title>
+		The Solar System
+	</title>
+
+	<!-- include three.js library -->
+	<script src='./js/three.js'></script>
+
+	<!-- include jsartookit -->
+	<script src="./js/jsartoolkit5/artoolkit.min.js"></script>
+	<script src="./js/jsartoolkit5/artoolkit.api.js"></script>
+
+	<script src="./js/ar-threex.js"></script>
+	<!--Set Base URL for the THEEx Library to reference normally '../' -->
+	<script>THREEx.ArToolkitContext.baseURL = './js/'</script>
+
+</head>
+
+<body style='margin : 0px; overflow: hidden; font-family: Monospace;'>
+
+<!--
+	Solar System Created by Eric Greenberg using CC0 images from https://www.solarsystemscope.com/textures/ and NASA https://nasa3d.arc.nasa.gov/detail/plu0rss1
+	Based on the AR.js library and examples created by Jerome Etienne: https://github.com/jeromeetienne/AR.js/ and by Lee Stemkoski: https://github.com/stemkoski
+-->
+
+<script>
+
+	//Initialize varible names the correct scope for later use.
+	var scene, camera, renderer, clock, deltaTime, totalTime;
+	var arToolkitSource, arToolkitContext;
+
+	//Initialize an object on the outer most scope to be used as a global variable (object values accesed by key-value pairs will be referenced by address rather than by value)
+	var globalVar = {
+	
+		planetNameArray: [ "Sun", "Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune", "Pluto" ], //this array will be used to name and access the generated meshes
+		Object3dContainers: {},
+		userMesh: {}, //this object will contain the addresses of the generated meshes so they can be manilpulated anywhere in the code.
+		markerRoots: [], //The marker roots need to be accessed to correct smoothing issues
+		markerControls: [],
+		smoothedRoot: [],
+		smoothedControls: [],
+		userMeshGroups: {},
+		userObjectGroups: {},
+		orphanObject: {},
+		orphanMesh: {}
+
+	};
+
+	//Initialize system
+	initialize();
+
+	//trigger animation loop
+	animate();
+
+	function initialize(){
+
+		//Create the ThreeJS Scene
+		scene = new THREE.Scene(); //naming the scene "scene" for the sake of simplicity
+
+		//Set up light so the WebGL rendered objects will be visible
+		//Gnerarate the light.
+		//in this case, an ambient liight with the color set to Gray80  (hex code CC CC CC), and a mid-level intensity -- 50%
+		let ambientLight = new THREE.AmbientLight( 0xcccccc, 0.5 );
+		//Add the light to the scene so it will exisit in the same space as the rendered objects
+		scene.add( ambientLight );
+		
+		//Generate a camera to view the objects
+		//camera = new THREE.Camera();
+
+		camera = new THREE.PerspectiveCamera(
+		//camera = new THREE.DeviceOrientationControls(
+  			70, // Field of view
+			window.innerWidth / window.innerHeight * window.devicePixelRatio, //window.innerWidth / window.innerHeight, // Aspect ratio
+  			0.01, // Near clipping plane
+  			1000 // Far clipping plane
+		);
+
+		//Add the camera to the scene so it will exist in the same space as the objects
+		scene.add(camera);
+
+		//Generate a renderer and set the parameters
+		renderer = new THREE.WebGLRenderer({
+			antialias : true, //Antialias to get smooth edges
+			alpha: true //Alpha (transparency) support will be needed to make somethings invisible
+		});
+		renderer.setClearColor(new THREE.Color('lightgrey'), 0); //Think of this as the same technology behind a weatherman's green screen -- you tell it a color you want to target (in this case, gray), and how visible you want it to be (in this case, 0). This will let us see the camera feed behind the rendered objects.
+		renderer.setSize( 640, 480 ); //set the size in pixesl of the renderer -- 640x480 is an early resolution from Standard VGA days.
+		renderer.domElement.style.position = 'absolute'; //dom elements are a technical way of saying "a piece of HTML" -- this code makes sure the user can't scroll around the screen and locks the big render in place.
+		renderer.domElement.style.top = '0px'; //Again, targeting a piece of HTML -- this time it's removing padding in the web browser so the render window will fill the whole screen
+		renderer.domElement.style.left = '0px';//Again, targeting a piece of HTML -- this time it's removing padding in the web browser so the render window will fill the whole screen
+		document.body.appendChild( renderer.domElement ); //This code targets the body of the HTML and adds the render that was created in code so there's something for the user to look at.
+
+		clock = new THREE.Clock(); //this "clock" will allow the code to animate on a schedule
+		deltaTime = 0; //varible for use in the clock/animation loop
+		totalTime = 0;//varible for use in the clock/animation loop
+		
+		///////////////////////////////////////////////////////////////////////
+		// Setup arToolkitSource
+		///////////////////////////////////////////////////////////////////////
+
+		//The arToolkitSource allows us to access the camera on a user's device. This is done through some fancey WebAssembly (WASM) code --  code for accessing a wide range of hardware through Javascript via a virtual machine.
+		arToolkitSource = new THREEx.ArToolkitSource({
+			sourceType : 'webcam',
+			sourceWidth: window.innerWidth,
+			sourceHeight: window.innerHeight,
+			displayWidth: window.innerWidth,
+			displayHeight: window.innerHeight
+		});
+
+		//Make sure that if the browser window changes size, the arToolkit is aware of it so it can re-render to fit the window.
+		
+		function onResize() {
+			arToolkitSource.onResizeElement()
+			arToolkitSource.copyElementSizeTo(renderer.domElement)
+			if (window.arToolkitContext) { //The arToolKitContext is generated in a differnt function, so check that the arToolkitContext is actually on the Window before searching it.
+				if (window.arToolkitContext.arController !== null) {
+					arToolkitSource.copyElementSizeTo(window.arToolkitContext.arController.canvas)
+				}
+			}
+		}
+		/*
+		function onResize() {
+			arToolkitSource.onResizeElement();	
+			arToolkitSource.copyElementSizeTo(renderer.domElement); //set the size to the HTML element
+			if ( arToolkitContext.arController !== null ) {
+
+				arToolkitSource.copyElementSizeTo(arToolkitContext.arController.canvas);	
+
+			}	
+		};
+		*/
+
+		//Tell AR toolkit to initialise. if it's resized it will match the same as the renderer on the HTML page.
+		arToolkitSource.init(function onReady(){
+			onResize();
+			//arToolkitSource.copyElementSizeTo(arToolkitContext.arController.canvas);
+			//arToolkitSource.onResize(renderer.domElement);
+		});
+		
+		// handle resize event
+		window.addEventListener('resize', function(){
+			onResize();
+		});
+
+	
+	
+		/////////////////////////////////////////////////////////////////
+		// Setup the arToolkitContext
+		/////////////////////////////////////////////////////////////////	
+
+		// create atToolkitContext to handle the webcam
+		arToolkitContext = new THREEx.ArToolkitContext({
+			cameraParametersUrl: 'data/camera_para.dat',
+			detectionMode: 'mono'
+		});
+		
+		//Copy projection matrix to the camera (when the initialization is complete) so we can create the illusion of objects in 3D space
+		arToolkitContext.init( function onCompleted(){
+			camera.projectionMatrix.copy( arToolkitContext.getProjectionMatrix() );
+		});
+
+		//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+		// Setup markerRoots -- printed images that are prepared in advanced to be trackable by the Augmented Reality code
+		//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+		//Make a ThreeJS Texture Loader to bring in images to apply to 3D objects
+		let loader = new THREE.TextureLoader();	
+			
+		let createGroup = function( textureFileName, objectName, patternName){
+			//load the texture using a texture loader, 
+			let texture = loader.load( 'images/planets/' + textureFileName, render );
+
+			//Make a ThreeJS group that will be added to the scene later.
+			let markerRoot = new THREE.Group();
+			markerRoot.name = objectName;
+
+			globalVar.markerRoots.push(markerRoot); //store an accesspoint to the markerRoot memory address.
+
+			//Add the ThreeJS Group to the svene. Once added, the markerRoot varible name can be rewritten within this scope without damaging the previously used structures.
+			scene.add(markerRoot);
+
+			//If you need to reuse the ThreeX AR Marker Control, then you can set it to a varible like let markerControls = new THREEx.ArMarkerControls(...), for now, just triggering it is fine.
+			//Use the AR Marker Controlls to connect the pattern and the object together
+			
+			//var markerControls = new THREEx.ArSmoothedControls(markerRoot, { //broken
+			
+			//var markerControls = new THREEx.ArSmoothedControls(arToolkitContext, markerRoot, {
+			var markerControls = new THREEx.ArMarkerControls(arToolkitContext, markerRoot, {
+				type : 'pattern', 
+				patternUrl : "data/ScienceDay2023MarkersAndPatterns/" + patternName + ".patt",
+				
+				smooth: true, //Activate smoothing
+
+				smoothCount: 5, // number of matrices to smooth tracking over, more = smoother but slower follow                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+	    		smoothTolerance: 0.01, // distance tolerance for smoothing, if smoothThreshold # of matrices are under tolerance, tracking will stay still
+	    		smoothThreshold: 2 //Wobble control	// threshold for smoothing, will keep still unless enough matrices are over tolerance
+	    		
+			});
+			globalVar.markerControls.push(markerControls); //store an access point to the markerControls memory address.
+
+
+			// interpolates from last position to create smoother transitions when moving.
+			// parameter lerp values near 0 are slow, near 1 are fast (instantaneous).
+			let smoothedRoot = new THREE.Group();
+			scene.add(smoothedRoot);
+			smoothedControls = new THREEx.ArSmoothedControls(smoothedRoot, {
+				lerpPosition: 0.8,
+				lerpQuaternion: 0.8,
+				lerpScale: 1,
+				// minVisibleDelay: 1,
+				// minUnvisibleDelay: 1,
+			});
+			globalVar.smoothedRoot.push(smoothedRoot); //store an access point to the smoothedRoot memory address.
+
+			globalVar.smoothedControls.push(smoothedControls); //store an access point to the smoothedControls memory address.
+
+			//Replaced with the built-in ArSmoothedControls
+			/*
+			// Create an onRender function for the markerRoot
+			markerRoot.onRender = function() {
+				// Get the current rotation of the marker root
+				const currentRotation = markerRoot.quaternion.clone();
+
+				// Compute the desired rotation using the current marker matrix
+				const desiredRotation = new THREE.Quaternion().setFromRotationMatrix(markerControls.object3d.matrixWorld);
+
+				// Apply an easing function to smooth the rotation over time
+				const alpha = 0.05;
+				const newRotation = currentRotation.slerp(desiredRotation, alpha, (t) => t * (2 - t));
+
+				// Set the new rotation of the marker root
+				markerRoot.quaternion.copy(newRotation);
+			};
+			*/
+
+			//Create a mesh to combine the geometry with a material so it can be loaded onto the marker
+			let mesh = new THREE.Mesh( 
+				new THREE.SphereGeometry(1, 32,32),
+								new THREE.MeshBasicMaterial({
+									color:0xffffff, 
+									map:texture, 
+									transparent:true, 
+									opacity:0.85
+								}) 
+			);
+
+			mesh.position.y = 1.25/2;
+
+            if(objectName == "Sun"){
+                mesh.scale.set( 3,3,3);  
+            }
+
+            if(objectName == "Mercury"){
+                mesh.scale.set( 0.3, 0.3, 0.3);   
+            }
+
+            if(objectName == "Venus"){
+                mesh.scale.set( 0.5, 0.5, 0.5 );   
+            }
+
+            if(objectName == "Earth"){
+                mesh.scale.set( 0.5, 0.5, 0.5);                
+            }
+
+            if(objectName == "Mars"){
+                mesh.scale.set( 0.3, 0.3, 0.3 );
+            }
+
+            if(objectName == "Jupiter"){
+                mesh.scale.set( 2, 2, 2 );
+            }
+            
+
+            if(objectName == "Saturn"){
+
+				const ringGeo = new THREE.RingGeometry( 
+                    1.2, //innerRadius
+                    2, //outerRadius
+                    32 //segments
+				);
+
+        		const ringMat = new THREE.MeshBasicMaterial({
+            		map: new THREE.TextureLoader().load( "images/rings/ring-saturn.png", render ),
+					//textureLoader.load(meshData.texture),
+            		side: THREE.DoubleSide
+				});
+
+        		globalVar.orphanMesh.SaturnRing = new THREE.Mesh(ringGeo, ringMat);
+                globalVar.orphanMesh.SaturnRing .rotation.x = -0.5 * Math.PI;
+                mesh.add(globalVar.orphanMesh.SaturnRing);
+
+                mesh.scale.set( 2, 2, 2 );
+            }
+
+            
+            if(objectName == "Uranus"){
+
+                const ringGeo = new THREE.RingGeometry( 
+                    1.2, //innerRadius
+                    1.8, //outerRadius
+                    32 //segments
+                );
+
+                const ringMat = new THREE.MeshBasicMaterial({
+                    map: new THREE.TextureLoader().load( "images/rings/ring-uranus.png", render ),
+                    //textureLoader.load(meshData.texture),
+                    side: THREE.DoubleSide
+                });
+
+                globalVar.orphanMesh.UranusRing = new THREE.Mesh(ringGeo, ringMat);
+                globalVar.orphanMesh.UranusRing.rotation.x = 3;//-0.33 * Math.PI;
+                mesh.add(globalVar.orphanMesh.UranusRing);
+                
+                mesh.scale.set( 1, 1, 1 );
+
+            }
+
+            if(objectName == "Neptune"){
+                mesh.scale.set( 1, 1, 1);
+            }
+
+            if(objectName == "Pluto"){
+                mesh.scale.set( 0.3, 0.3, 0.3 );
+            }
+            
+            
+			//markerRoot.add( mesh );
+			globalVar.userMesh[objectName] = mesh;
+			markerRoot.add( globalVar.userMesh[objectName] );
+		};
+
+		let addToGroup = function(meshToAdd, destination){
+
+		};
+
+		let generateOrphanMesh = function(meshName, geometryType, geometryData, meshData){
+			//globalVar.orphanMesh
+			if(!meshName || !geometryType || !geometryData || !meshData){
+				return;
+			}
+
+
+			if(geometryType === "ring"){
+				
+				const ringGeo = new THREE.RingGeometry(
+					
+					geometryData.innerRadius,
+					geometryData.outerRadius,
+            		geometryData.segments
+				);
+
+        		const ringMat = new THREE.MeshBasicMaterial({
+            		map: loader.load( meshData, render ),
+					//textureLoader.load(meshData.texture),
+            		side: THREE.DoubleSide
+				});
+
+        		globalVar.orphanMesh.meshName = new THREE.Mesh(ringGeo, ringMat);
+
+			};
+
+			//globalVar.orphanMesh.meshName
+
+		};
+
+		//Build an array to store the names of the of the marker pattern files that need to be loaded into the code for the display to track. 
+		let patternArray = ["2BLKSqs1L", "2Squares1Equals", "BLKSqAndReq", "Blocky6", "BlockyFour", "BlockyIP", "BlockyM", "PlusAndBlackSquare", "TriangleAndSquare", "UpsideDownWhiteL"];
+			
+		//instead of (or in adition to) using textures, an array can be built to apply colors (as stored as hex) -- exmple:
+		//let colorArray   = [0xff0000, 0xff8800, 0xffff00, 0x00cc00, 0x0000ff, 0xcc00ff, 0xcccccc, 0xccaacc, 0xaaaccc, 0x2200ff];
+		
+		//Names of the objects that are being generated
+		let objectNameArray = [ "Sun", "Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune", "Pluto" ];
+
+			//Image Texture's names -- make sure the positions in the array match the object name's positions, and pattern name positions
+		let textureFileNameArray = [ "0.jpg", "1.jpg", "2.jpg", "3.jpg", "4.jpg", "5.jpg", "6.jpg", "7.jpg", "8.jpg", "9.jpg" ]; 
+
+		//Load the objects into groups
+		for (let i = 0; i < patternArray.length; i++) {
+			createGroup( textureFileNameArray[i], objectNameArray[i], patternArray[i]);
+		};
+
+		//create the rings
+	generateOrphanMesh(
+		"SaturnRing", 
+		"ring", 
+		{
+			innerRadius: 7,
+    		outerRadius: 12,
+			segments: 32
+		}, 
+		"images/rings/ring-saturn.png"
+		);
+	//meshName, geometryType, geometryData, meshData
+
+		//add the rings
+/*
+innerRadius: 7,
+    outerRadius: 12,
+	segments: 32
+geometryData.innerRadius,
+					geometryData.outerRadius,
+            		geometryData.segments
+*/
+		
+	};
+
+	
+
+	//Start test Code
+	//console.log("scene: "); //test code
+	//console.dir(scene); //Test Code
+	//console.log("scene.children: "); //Test Code
+	//console.dir(scene.children); //Test Code
+	//console.log("scene.children.length: "); //Test Code
+	//console.dir(scene.children.length); //Test Code
+	//console.log("scene.children[3]: "); //Test Code
+	//console.dir(scene.children[3]); //Test Code
+	//console.dir(scene.children[3]); //Test Code
+	//console.log( "globalVar.userMesh: "); //Test Code
+	//console.dir(globalVar.userMesh); //Test Code
+	//console.log( "globalVar.planetNameArray" ); //test code
+	//console.dir( globalVar.planetNameArray); //test code
+
+	
+	//for (let i = 0; i < globalVar.planetNameArray.length; i++) { //Test Code
+	//	
+	//		console.log( "globalVar.userMesh." + globalVar.planetNameArray[i] + ": ");  //Test Code
+	//		console.dir(globalVar.userMesh[globalVar.planetNameArray[i].toString()]); //Test Code
+	//	}; //Test code
+
+	//End test code
+
+
+	function update(markerToUpdate, smoothControlToUpdate) {
+		
+		// update artoolkit on every frame
+		if ( arToolkitSource.ready !== false ){
+				arToolkitContext.update( arToolkitSource.domElement );
+		}
+
+		// additional code for smoothed controls
+		if(smoothControlToUpdate && markerToUpdate){
+			smoothControlToUpdate.update(markerToUpdate);
+		}
+		
+	};
+
+
+	function render() {
+		renderer.render( scene, camera );
+	};
+
+
+	function animate() {
+
+		//Animate each planet
+		for (let i = 0; i < globalVar.planetNameArray.length; i++) {
+			
+			//console.log( "globalVar.userMesh." + globalVar.planetNameArray[i] + ": "); //Test code
+			//console.dir(globalVar.userMesh[globalVar.planetNameArray[i].toString()]); //Test code
+            
+            //let objectNameArray = [ "Sun", "Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune", "Pluto" ];
+            
+            if(globalVar.planetNameArray[i].toString() == "Sun"){
+                globalVar.userMesh[globalVar.planetNameArray[i].toString()].rotation.y += 0.0004;
+            }
+
+            if(globalVar.planetNameArray[i].toString() == "Mercury"){
+                globalVar.userMesh[globalVar.planetNameArray[i].toString()].rotation.y += 0.0004;
+            }
+
+            if(globalVar.planetNameArray[i].toString() == "Venus"){
+                globalVar.userMesh[globalVar.planetNameArray[i].toString()].rotation.y += 0.0002;
+            }
+
+            if(globalVar.planetNameArray[i].toString() == "Earth"){
+                globalVar.userMesh[globalVar.planetNameArray[i].toString()].rotation.y += 0.002;
+            }
+
+            if(globalVar.planetNameArray[i].toString() == "Mars"){
+                globalVar.userMesh[globalVar.planetNameArray[i].toString()].rotation.y += 0.0018;
+            }
+
+            if(globalVar.planetNameArray[i].toString() == "Jupiter"){
+                globalVar.userMesh[globalVar.planetNameArray[i].toString()].rotation.y += 0.004;
+            }
+
+            if(globalVar.planetNameArray[i].toString() == "Saturn"){
+                globalVar.userMesh[globalVar.planetNameArray[i].toString()].rotation.y += 0.0038;
+            }
+
+            if(globalVar.planetNameArray[i].toString() == "Uranus"){
+                globalVar.userMesh[globalVar.planetNameArray[i].toString()].rotation.y += 0.003;
+            }
+
+            if(globalVar.planetNameArray[i].toString() == "Neptune"){
+                globalVar.userMesh[globalVar.planetNameArray[i].toString()].rotation.y += 0.0032;
+            }
+
+            if(globalVar.planetNameArray[i].toString() == "Pluto"){
+                globalVar.userMesh[globalVar.planetNameArray[i].toString()].rotation.y += 0.0008;
+            }
+            
+            //globalVar.userMesh[globalVar.planetNameArray[i].toString()].rotation.y += 0.01;
+		}; 
+
+		// Loop through all the markers and update the markers
+		for (let i = 0; i < globalVar.markerRoots.length; i++) {
+			//console.log("globalVar.markerRoots[i]: "); //Test Code
+			//console.dir(globalVar.markerRoots[i]); //test code
+
+			// Update the marker's position and orientation
+			update(globalVar.markerRoots[i].markerObject, globalVar.smoothedControls[i]);
+
+			// Call the onRender function for the marker's root object
+			//globalVar.markerRoots[i].onRender();
+		}
+
+		requestAnimationFrame(animate);
+		deltaTime = clock.getDelta();
+		totalTime += deltaTime;
+		update();
+		render();
+
+	};
+
+
+</script>
+
+</body>
+
+
+</html>
