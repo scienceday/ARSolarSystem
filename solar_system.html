@@ -121,7 +121,18 @@
 					arToolkitSource.copyElementSizeTo(window.arToolkitContext.arController.canvas)
 				}
 			}
-		}
+		};
+
+		window.addEventListener('load', function () {
+			arToolkitSource.onResizeElement();
+			arToolkitSource.copyElementSizeTo(renderer.domElement);
+			if (window.arToolkitContext) { //The arToolKitContext is generated in a differnt function, so check that the arToolkitContext is actually on the Window before searching it.
+				if (window.arToolkitContext.arController !== null) {
+					arToolkitSource.copyElementSizeTo(window.arToolkitContext.arController.canvas)
+				}
+			}
+		});
+
 		/*
 		function onResize() {
 			arToolkitSource.onResizeElement();	
@@ -331,6 +342,13 @@
 			//markerRoot.add( mesh );
 			globalVar.userMesh[objectName] = mesh;
 			markerRoot.add( globalVar.userMesh[objectName] );
+
+			arToolkitSource.copyElementSizeTo(renderer.domElement);
+			if (window.arToolkitContext) { //The arToolKitContext is generated in a differnt function, so check that the arToolkitContext is actually on the Window before searching it.
+				if (window.arToolkitContext.arController !== null) {
+					arToolkitSource.copyElementSizeTo(window.arToolkitContext.arController.canvas)
+				}
+			}
 		};
 
 		let addToGroup = function(meshToAdd, destination){
